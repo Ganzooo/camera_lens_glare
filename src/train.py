@@ -18,10 +18,8 @@ import random
 sys.path.append(osp.dirname(osp.dirname(osp.abspath(__file__))))
 
 from dataset.dataloader import load_dataset
-from optimizers import get_optimizer
-from schedulers import get_scheduler
 from models.resnet50_unet import UNetWithResnet50Encoder
-#from models.MIRNet_model import MIRNet
+from models.MIRNet_model import MIRNet
 
 from utils.utils import get_logger
 from icecream import ic
@@ -41,16 +39,14 @@ def weights_init(m):
     if isinstance(m, nn.Conv2d):
         nn.init.xavier_normal_(m.weight)
 
-
 class Trainer(object):
     def __init__(self, data_path, batch_size, max_epoch, pretrained_model,
-                 train_data_num, val_data_num,
-                 width, height, use_constant_feature, use_intensity_feature, vis_on, resume_train, work_dir, args):
+                 width, height, resume_train, work_dir, args):
 
         self.train_dataloader, self.val_dataloader, self.test_dataloader = load_dataset(data_path, batch_size, distributed=False, train_valid_split_weight=0.9, resize_size=(args.width,args.height))
         self.max_epoch = max_epoch
         self.time_now = datetime.now().strftime('%Y%m%d_%H%M')
-        self.best_psnr = 1e10
+        self.best_psnr = 0
         self.args = args
 
         self.logdir = osp.join("./", work_dir)
@@ -58,7 +54,10 @@ class Trainer(object):
         self.logger.info("Let the train begin...")
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = UNetWithResnet50Encoder().to(self.device)
+        if args.model_type == "MIRNet":
+            self.model = MIRNet().to(self.device)
+        else:
+            self.model = UNetWithResnet50Encoder().to(self.device)
 
         self.save_model_interval = 1
         self.loss_print_interval = 1
@@ -231,34 +230,20 @@ def parse():
         default='/dataset_sub/camera_light_glare/')
     parser.add_argument('--batch_size', '-bs', type=int,
                         help='batch size',
-                        default=6)
+                        default=1)
     parser.add_argument('--max_epoch', '-me', type=int,
                         help='max epoch',       
                         default=300)
     parser.add_argument('--pretrained_model', '-p', type=str,
                         help='Pretrained model path',
-                        default='./checkpoints/bcnn_latestmodel_20210607_0809.pt')
-    parser.add_argument('--train_data_num', '-tn', type=int,
-                        help='Number of data used for training. Larger number if all data are used.',
-                        default=1000000)
-    parser.add_argument('--val_data_num', '-vn', type=int,
-                        help='Nuber of  data used for validation. Larger number if all data are used.',
-                        default=100000)
+                        #default='./checkpoints/bcnn_latestmodel_20210607_0809.pt')
+                        default=None)
     parser.add_argument('--width', type=int,
                         help='feature map width',
                         default=512)
     parser.add_argument('--height', type=int,
                         help='feature map height',
                         default=512)
-    parser.add_argument('--use_constant_feature', type=int,
-                        help='Whether to use constant feature',
-                        default=0)
-    parser.add_argument('--use_intensity_feature', type=int,
-                        help='Whether to use intensity feature',
-                        default=0)
-    parser.add_argument('--visualization_on', type=int,
-                        help='Whether to use visualaziation on during train',
-                        default=0)
     parser.add_argument('--resume', type=str,
                         help='Train process resume cur/bcnn_latestmodel.pt',
                         #default='./cur/deglare/bcnn_latestmodel.pt')
@@ -269,19 +254,15 @@ def parse():
     parser.add_argument('--local_rank', default=0, type=int)
     parser.add_argument('--sync-bn', action='store_true',
                         help='enabling apex sync BN.', default =False)
-
     parser.add_argument('--opt-level', type=str, default = 'O1')
     parser.add_argument('--keep-batchnorm-fp32', type=str, default=None)
     parser.add_argument('--loss-scale', type=str, default=None)
     parser.add_argument('--distributed', type=bool, default=False)
     parser.add_argument('--loss_type', type=str, default='BcnnLoss')
     parser.add_argument('--save_image', type=bool, default=True)
-    parser.add_argument('--submission_dir', type=str,
-                        help='Work directory submission',
-                        default='./submission/')
-    parser.add_argument('--result_dir', type=str,
-                        help='Work directory submission',
-                        default='./result/')
+    parser.add_argument('--submission_dir', type=str, help='Work directory submission', default='./submission/')
+    parser.add_argument('--result_dir', type=str, help='Work directory submission', default='./result/')
+    parser.add_argument('--model_type', type=str, help='Work directory submission', default='resnet_unet')
 
     args = parser.parse_args()
     return args
@@ -303,13 +284,8 @@ if __name__ == "__main__":
                       batch_size=args.batch_size,
                       max_epoch=args.max_epoch,
                       pretrained_model=args.pretrained_model,
-                      train_data_num=args.train_data_num,
-                      val_data_num=args.val_data_num,
                       width=args.width,
                       height=args.height,
-                      use_constant_feature=args.use_constant_feature,
-                      use_intensity_feature=args.use_intensity_feature,
-                      vis_on = args.visualization_on,
                       resume_train = args.resume,
                       work_dir = args.work_dir, 
                       args=args)
