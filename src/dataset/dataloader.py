@@ -38,6 +38,7 @@ def load_dataset(data_path, batch_size, distributed, train_valid_split_weight=0.
 
 class DataLoaderImg(Dataset):
     def __init__(self, data_path, mode='train', transform=True, resize_size=(512,512)):
+        self.mode = mode
         self.data_path = data_path
         self.transform = transform
         self.target_size = resize_size
@@ -57,7 +58,10 @@ class DataLoaderImg(Dataset):
         return len(self.in_feature_paths)
     
     def __transform__(self, img):
-        img = cv2.resize(img, (self.target_size[0], self.target_size[1]))
+        if self.mode == 'test':
+            img = cv2.resize(img, (self.target_size[0], self.target_size[1]))
+        else:
+            img = cv2.resize(img, (2048, 1024))
         img = img / 255.0
         img = img.transpose(2, 0, 1)
 

@@ -137,3 +137,9 @@ dmypy.json
 *.onnx
 .vscode
 *.json
+.vscode/settings.json
+.vscode/launch.json
+.vscode/launch.json
+.vscode/settings.json
+*.pth 
+*.zip
