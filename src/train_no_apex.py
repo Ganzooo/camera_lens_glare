@@ -46,6 +46,7 @@ class Trainer(object):
         self.max_epoch = max_epoch
         self.time_now = datetime.now().strftime('%Y%m%d_%H%M')
         self.best_psnr = 0
+        self.best_test = False
         self.args = args
 
         self.logdir = osp.join("./", work_dir)
@@ -65,7 +66,7 @@ class Trainer(object):
         #self.optimizer = get_optimizer("SGD", self.model)
         self.optimizer = optim.Adam(self.model.parameters(), lr=2e-4, betas=(0.9, 0.999),eps=1e-8, weight_decay=1e-8)
         ######### Scheduler ###########
-        warmup = False
+        warmup = True
         if warmup:
             warmup_epochs = 3
             scheduler_cosine = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, self.max_epoch-warmup_epochs, eta_min=1e-6)
@@ -111,6 +112,7 @@ class Trainer(object):
     def step(self, mode):
         #print('Start {}'.format(mode))
         ic('Start {}'.format(mode))
+        self.best_test = False
 
         if mode == 'train':
             self.model.train()
@@ -120,7 +122,7 @@ class Trainer(object):
             dataloader = self.val_dataloader
 
         loss_sum = 0
-
+        psnr_val_rgb = []
         #criterion = torch.nn.MSELoss().to(self.device)
         ######### Loss ###########
         criterion = CharbonnierLoss().cuda()
@@ -145,7 +147,6 @@ class Trainer(object):
                 loss_sum += loss.item()
 
             if mode == 'val':
-                psnr_val_rgb = []
                 with torch.no_grad():
                     pred = self.model(img)
                     pred = torch.clamp(pred,0,1) 
@@ -159,7 +160,7 @@ class Trainer(object):
                         for batch in range(img.shape[0]):
                             temp = np.concatenate((img[batch]*255, pred[batch]*255, gt[batch]*255),axis=1)
                             save_img(osp.join(args.result_dir + str(index) + fname[batch][:-4] +'.jpg'),temp.astype(np.uint8))
-        if np.mod(index, self.loss_print_interval) == 0 and mode=='train':
+        if np.mod(self.epo, self.loss_print_interval) == 0 and mode=='train':
             format_str = "epoch: {}\n avg loss: {:3f}"
             print_str = format_str.format(int(self.epo) ,float(loss_sum))
             ic(print_str)
@@ -168,6 +169,7 @@ class Trainer(object):
             psnr_val_rgb = sum(psnr_val_rgb)/len(psnr_val_rgb)
             if psnr_val_rgb > self.best_psnr:
                 self.best_psnr = psnr_val_rgb
+                self.best_test = True
                 #ic('update best model {} -> {}'.format(self.best_loss, loss_sum / len(dataloader)))
                 _state = {
                     "epoch": index + 1,
@@ -184,7 +186,7 @@ class Trainer(object):
 
         if np.mod(self.epo, self.save_model_interval) == 0:
             _state = {
-                "epoch": index + 1,
+                "epoch": self.epo + 1,
                 "model_state": self.model.state_dict(),
                 "optimizer_state": self.optimizer.state_dict(),
                 "scheduler_state": self.scheduler.state_dict(),
@@ -198,7 +200,8 @@ class Trainer(object):
         for self.epo in range(self.start_epo, self.max_epoch):
             self.step('train')
             self.step('val')
-            self.test()
+            if self.best_test:
+                self.test()
             #self.scheduler.step()
 
     def test(self):
@@ -233,7 +236,7 @@ def parse():
         default='/dataset_sub/camera_light_glare/')
     parser.add_argument('--batch_size', '-bs', type=int,
                         help='batch size',
-                        default=6)
+                        default=15)
     parser.add_argument('--max_epoch', '-me', type=int,
                         help='max epoch',       
                         default=300)
@@ -243,10 +246,10 @@ def parse():
                         default=None)
     parser.add_argument('--width', type=int,
                         help='feature map width',
-                        default=512)
+                        default=256)
     parser.add_argument('--height', type=int,
                         help='feature map height',
-                        default=512)
+                        default=256)
     parser.add_argument('--resume', type=str,
                         help='Train process resume cur/bcnn_latestmodel.pt',
                         #default='./cur/deglare/glare_latestmodel_94.pt')
