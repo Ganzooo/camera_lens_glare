@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import pickle
 import cv2
+import os
 
 def is_numpy_file(filename):
     return any(filename.endswith(extension) for extension in [".npy"])
@@ -36,6 +37,9 @@ def load_img(filepath):
     return img
 
 def save_img(filepath, img):
+    directory = os.path.dirname(filepath)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
     cv2.imwrite(filepath,cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
 
 def myPSNR(tar_img, prd_img):

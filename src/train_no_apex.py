@@ -166,7 +166,7 @@ class Trainer(object):
                             temp2 = np.concatenate((img[2]*255, pred[2]*255, gt[2]*255),axis=1)  
                             temp3 = np.concatenate((img[3]*255, pred[3]*255, gt[3]*255),axis=1)  
                             temp = np.concatenate((temp0, temp1, temp2, temp3),axis=0)  
-                            save_img(osp.join(args.result_dir + '/train/batches_'+ str(iter) + '.jpg'),temp.astype(np.uint8))
+                            save_img(osp.join(args.result_dir + '/train/' + str(self.epo) + '/batches_'+ str(iter) + '.jpg'),temp.astype(np.uint8))
                         else:
                             for batch in range(img.shape[0]):
                                 temp = np.concatenate((img[batch]*255, pred[batch]*255, gt[batch]*255),axis=1)    
@@ -186,7 +186,7 @@ class Trainer(object):
                         
                         for batch in range(img.shape[0]):
                             temp = np.concatenate((img[batch]*255, pred[batch]*255, gt[batch]*255),axis=1)
-                            save_img(osp.join(args.result_dir + str(index) + fname[batch][:-4] +'.jpg'),temp.astype(np.uint8))
+                            save_img(osp.join(args.result_dir + '/val/'+ str(index) + fname[batch][:-4] +'.jpg'),temp.astype(np.uint8))
         if np.mod(self.epo, self.loss_print_interval) == 0 and mode=='train':
             format_str = "epoch: {}\n avg loss: {:3f}"
             print_str = format_str.format(int(self.epo) ,float(loss_sum/iter))
