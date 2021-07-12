@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 python src/train_no_apex.py --batch_size 26 --max_epoch 60 --data_path /mnt/nvme2n1TB/work/dataset/camera_light_glare/ --width 512 --height 512 --model_type Uformer16161616161616161616161616161616 --result_dir ./result_ufromer/ --work_dir ./cur/deglare_uformer/ --submission_dir ./submission_uformer 

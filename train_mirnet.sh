@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=1 python src/train_no_apex.py --batch_size 4 --max_epoch 300 --data_path /home/kt05/work/dataset/camera_light_glare/ --width 256 --height 256 --model_type MIRNet --result_dir ./result_mirnet/ --work_dir ./cur/deglare_mirnet/ --pretrained_model ./checkpoints/model_denoising.pth --submission_dir ./submission_mirnet 

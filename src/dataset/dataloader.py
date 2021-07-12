@@ -14,7 +14,7 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 
-def load_dataset(data_path, batch_size, distributed, train_valid_split_weight=0.9, resize_size=(512,512)):
+def load_dataset(data_path, batch_size, distributed, train_valid_split_weight=0.9, resize_size=(512,512), model_type='baseline'):
 
     #_dataloader = DataLoaderImg(data_path, mode='train', resize_size=resize_size)
     # train_size = int(train_valid_split_weight * len(_dataloader))
@@ -27,20 +27,23 @@ def load_dataset(data_path, batch_size, distributed, train_valid_split_weight=0.
     transformer_train = A.Compose([
         #A.Resize(256,256),
         #A.RandomCrop(224,224),
-        A.HorizontalFlip(p=1),
-        A.RandomRotate90(p=1),
-        A.VerticalFlip(p=1),
-        A.MotionBlur(p=0.5),
-        A.OpticalDistortion(p=0.5),
-        A.GaussNoise(p=0.5),
+        A.HorizontalFlip(p=0.5),
+        A.RandomRotate90(p=0.5),
+        A.VerticalFlip(p=0.5),
+        #A.MotionBlur(p=0.5),
+        #A.OpticalDistortion(p=0.5),
+        #A.GaussNoise(p=0.5),
         #A.Normalize(255),
         ToTensorV2()
         ])
-    transformer_test = A.Compose([
-        A.Resize(2048, 1024),
-        #A.Normalize(255),
-        ToTensorV2()
-        ])
+    if model_type == "MIRNet":
+        transformer_test = A.Compose([A.Resize(2048, 1024), ToTensorV2()])
+    elif model_type == "Uformer16":
+        transformer_test = A.Compose([A.Resize(2048, 2048), ToTensorV2()])
+    elif model_type == "Uformer32":
+        transformer_test = A.Compose([A.Resize(2048, 2048), ToTensorV2()])
+    else:
+        transformer_test = A.Compose([A.Resize(2048, 1024), ToTensorV2()])
 
     train_dataset = DataLoaderImg(data_path, mode='train', resize_size=resize_size, transform=transformer_train)
     val_dataset = DataLoaderImg(data_path, mode='val', resize_size=resize_size, transform=transformer_train)
@@ -71,13 +74,13 @@ class DataLoaderImg(Dataset):
         if self.dataset_type == 'train':
             #self.in_feature_paths = list(sorted(Path(self.data_path).glob("train/train_input_img/*.png")))
             #self.target_feature_paths = list(sorted(Path(self.data_path).glob("train/train_label_img/*.png")))
-            self.in_feature_paths = list(sorted(Path(self.data_path).glob("patches_256/train_patch/train_input_img/*.png")))
-            self.target_feature_paths = list(sorted(Path(self.data_path).glob("patches_256/train_patch/train_label_img/*.png")))
+            self.in_feature_paths = list(sorted(Path(self.data_path).glob("patches_512_sample/train_patch/train_input_img/*.png")))
+            self.target_feature_paths = list(sorted(Path(self.data_path).glob("patches_512_sample/train_patch/train_label_img/*.png")))
         elif self.dataset_type == 'val':    
             #self.in_feature_paths = list(sorted(Path(self.data_path).glob("train/train_input_img/*.png")))
             #self.target_feature_paths = list(sorted(Path(self.data_path).glob("train/train_label_img/*.png")))
-            self.in_feature_paths = list(sorted(Path(self.data_path).glob("patches_256/val_patch/train_input_img/*.png")))
-            self.target_feature_paths = list(sorted(Path(self.data_path).glob("patches_256/val_patch/train_label_img/*.png")))
+            self.in_feature_paths = list(sorted(Path(self.data_path).glob("patches_512_sample/val_patch/train_input_img/*.png")))
+            self.target_feature_paths = list(sorted(Path(self.data_path).glob("patches_512_sample/val_patch/train_label_img/*.png")))
         elif self.dataset_type == 'test':
             self.test_feature_paths = list(sorted(Path(self.data_path).glob("test_input_img/*.png")))
 
@@ -95,9 +98,7 @@ class DataLoaderImg(Dataset):
             img = cv2.resize(img, (2048, 1024))
         img = img / 255.0
         img = img.transpose(2, 0, 1)
-
         return torch.from_numpy(img).float()
-
 
     def __getitem__(self, idx):
         if self.dataset_type == 'test':

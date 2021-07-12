@@ -19,6 +19,7 @@ sys.path.append(osp.dirname(osp.dirname(osp.abspath(__file__))))
 from dataset.dataloader import load_dataset
 from models.resnet50_unet import UNetWithResnet50Encoder
 from models.MIRNet_model import MIRNet
+from models.Uformer import Uformer
 
 from utils.utils import get_logger
 from icecream import ic
@@ -42,7 +43,7 @@ class Trainer(object):
     def __init__(self, data_path, batch_size, max_epoch, pretrained_model,
                  width, height, resume_train, work_dir, args):
 
-        self.train_dataloader, self.val_dataloader, self.test_dataloader = load_dataset(data_path, batch_size, distributed=False, train_valid_split_weight=0.9, resize_size=(args.width,args.height))
+        self.train_dataloader, self.val_dataloader, self.test_dataloader = load_dataset(data_path, batch_size, distributed=False, train_valid_split_weight=0.9, resize_size=(args.width,args.height),model_type=args.model_type)
         self.max_epoch = max_epoch
         self.time_now = datetime.now().strftime('%Y%m%d_%H%M')
         self.best_psnr = 0
@@ -56,6 +57,10 @@ class Trainer(object):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         if args.model_type == "MIRNet":
             self.model = MIRNet().to(self.device)
+        elif args.model_type == "Uformer16":
+            self.model = Uformer(img_size=width,embed_dim=16,win_size=8,token_embed='linear',token_mlp='leff').to(self.device)
+        elif args.model_type == "Uformer32":
+            self.model = Uformer(img_size=width,embed_dim=32,win_size=8,token_embed='linear',token_mlp='leff').to(self.device)
         else:
             self.model = UNetWithResnet50Encoder().to(self.device)
 
@@ -66,14 +71,15 @@ class Trainer(object):
         #self.optimizer = get_optimizer("SGD", self.model)
         self.optimizer = optim.Adam(self.model.parameters(), lr=2e-4, betas=(0.9, 0.999),eps=1e-8, weight_decay=1e-8)
         ######### Scheduler ###########
-        warmup = True
-        if warmup:
-            warmup_epochs = 3
-            scheduler_cosine = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, self.max_epoch-warmup_epochs, eta_min=1e-6)
-            self.scheduler = GradualWarmupScheduler(self.optimizer, multiplier=1, total_epoch=warmup_epochs, after_scheduler=scheduler_cosine)
-            self.scheduler.step()
+        #warmup = True
+        #if warmup:
+        #    warmup_epochs = 3
+        #    scheduler_cosine = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, self.max_epoch-warmup_epochs, eta_min=1e-6)
+        #    self.scheduler = GradualWarmupScheduler(self.optimizer, multiplier=1, total_epoch=warmup_epochs, after_scheduler=scheduler_cosine)
+        #    self.scheduler.step()
 
-        #self.scheduler = get_scheduler('LambdaLR', self.optimizer, self.max_epoch)
+        self.scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lambda epo: 0.9 ** self.max_epoch)
+        #get_scheduler('LambdaLR', self.optimizer, self.max_epoch)
 
         #self.model, self.optimizer = amp.initialize(self.model, self.optimizer,
         #                opt_level=args.opt_level)
@@ -123,17 +129,19 @@ class Trainer(object):
 
         loss_sum = 0
         psnr_val_rgb = []
-        #criterion = torch.nn.MSELoss().to(self.device)
+        criterion = torch.nn.MSELoss(reduction='mean').to(self.device)
         ######### Loss ###########
-        criterion = CharbonnierLoss().cuda()
+        #criterion = CharbonnierLoss().cuda()
+        iter = 0
         for index, (img, gt, fname) in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
             
             img = img.to(self.device)
             gt = gt.to(self.device)
 
             if mode == 'train':
+                iter += 1
                 if self.epo > 5:
-                    target, input_ = self.mixup.aug(gt, img)
+                    gt, img = self.mixup.aug(gt, img)
                 pred = self.model(img)
             
                 loss = criterion(pred, gt)
@@ -145,6 +153,25 @@ class Trainer(object):
                 self.optimizer.step()
 
                 loss_sum += loss.item()
+
+                if args.save_image:
+                    if iter < 20:
+                        gt = gt.permute(0, 2, 3, 1).cpu().detach().numpy()
+                        img = img.permute(0, 2, 3, 1).cpu().detach().numpy()
+                        pred = pred.permute(0, 2, 3, 1).cpu().detach().numpy()
+                        
+                        if img.shape[0] > 4:
+                            temp0 = np.concatenate((img[0]*255, pred[0]*255, gt[0]*255),axis=1)  
+                            temp1 = np.concatenate((img[1]*255, pred[1]*255, gt[1]*255),axis=1)  
+                            temp2 = np.concatenate((img[2]*255, pred[2]*255, gt[2]*255),axis=1)  
+                            temp3 = np.concatenate((img[3]*255, pred[3]*255, gt[3]*255),axis=1)  
+                            temp = np.concatenate((temp0, temp1, temp2, temp3),axis=0)  
+                            save_img(osp.join(args.result_dir + '/train/batches_'+ str(iter) + '.jpg'),temp.astype(np.uint8))
+                        else:
+                            for batch in range(img.shape[0]):
+                                temp = np.concatenate((img[batch]*255, pred[batch]*255, gt[batch]*255),axis=1)    
+                                save_img(osp.join(args.result_dir + '/train/' + str(index) + fname[batch][:-4] +'.jpg'),temp.astype(np.uint8))
+
 
             if mode == 'val':
                 with torch.no_grad():
@@ -162,7 +189,7 @@ class Trainer(object):
                             save_img(osp.join(args.result_dir + str(index) + fname[batch][:-4] +'.jpg'),temp.astype(np.uint8))
         if np.mod(self.epo, self.loss_print_interval) == 0 and mode=='train':
             format_str = "epoch: {}\n avg loss: {:3f}"
-            print_str = format_str.format(int(self.epo) ,float(loss_sum))
+            print_str = format_str.format(int(self.epo) ,float(loss_sum/iter))
             ic(print_str)
             self.logger.info(print_str)
         if mode == 'val':
@@ -193,7 +220,7 @@ class Trainer(object):
             } 
             _save_path_latest = osp.join(self.logdir, '{}_latestmodel.pth'.format('glare'))
             torch.save(_state,_save_path_latest)
-        self.scheduler.step()
+        #self.scheduler.step()
 
     def train(self):
         """Start training."""
@@ -202,7 +229,7 @@ class Trainer(object):
             self.step('val')
             if self.best_test:
                 self.test()
-            #self.scheduler.step()
+            self.scheduler.step()
 
     def test(self):
         #"""start testing."""
@@ -236,7 +263,7 @@ def parse():
         default='/dataset_sub/camera_light_glare/')
     parser.add_argument('--batch_size', '-bs', type=int,
                         help='batch size',
-                        default=15)
+                        default=1)
     parser.add_argument('--max_epoch', '-me', type=int,
                         help='max epoch',       
                         default=300)
@@ -269,7 +296,7 @@ def parse():
     parser.add_argument('--save_image', type=bool, default=True)
     parser.add_argument('--submission_dir', type=str, help='Work directory submission', default='./submission/')
     parser.add_argument('--result_dir', type=str, help='Work directory submission', default='./result/')
-    parser.add_argument('--model_type', type=str, help='Work directory submission', default='resnet_unet')
+    parser.add_argument('--model_type', type=str, help='Work directory submission', default='Uformer16')
 
     args = parser.parse_args()
     return args

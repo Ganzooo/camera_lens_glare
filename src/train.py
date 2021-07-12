@@ -5,13 +5,11 @@ import argparse
 import os.path as osp
 import sys
 
-import gdown
 import numpy as np
 import torch
 import torch.optim as optim
 import torch.nn as nn
 import tqdm
-import visdom
 from datetime import datetime
 import random
 
@@ -75,8 +73,8 @@ class Trainer(object):
 
         #self.scheduler = get_scheduler('LambdaLR', self.optimizer, self.max_epoch)
 
-        self.model, self.optimizer = amp.initialize(self.model, self.optimizer,
-                        opt_level=args.opt_level)
+        #self.model, self.optimizer = amp.initialize(self.model, self.optimizer,
+        #                opt_level=args.opt_level)
 
         total_params = sum(p.numel() for p in self.model.parameters())
         #print( 'Parameters:',total_params )
@@ -134,13 +132,13 @@ class Trainer(object):
                 loss = criterion(pred, gt)
 
                 self.optimizer.zero_grad()
-                with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                    scaled_loss.backward()
-                #loss.backward()
+                #with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                #    scaled_loss.backward()
+                loss.backward()
                 self.optimizer.step()
 
                 loss_sum += loss.item()
-            
+
             if mode == 'val':
                 psnr_val_rgb = []
                 with torch.no_grad():
@@ -156,27 +154,26 @@ class Trainer(object):
                         for batch in range(img.shape[0]):
                             temp = np.concatenate((img[batch]*255, pred[batch]*255, gt[batch]*255),axis=1)
                             save_img(osp.join(args.result_dir + str(index) + fname[batch][:-4] +'.jpg'),temp.astype(np.uint8))
-
+        if np.mod(index, self.loss_print_interval) == 0 and mode=='train':
+            format_str = "epoch: {}\n avg loss: {:3f}"
+            print_str = format_str.format(int(self.epo) ,float(loss_sum))
+            ic(print_str)
+            self.logger.info(print_str)
         if mode == 'val':
             psnr_val_rgb = sum(psnr_val_rgb)/len(psnr_val_rgb)
             if psnr_val_rgb > self.best_psnr:
-                ic('update best model {} -> {}'.format(self.best_loss, loss_sum / len(dataloader)))
+                self.best_psnr = psnr_val_rgb
+                #ic('update best model {} -> {}'.format(self.best_loss, loss_sum / len(dataloader)))
                 _state = {
                     "epoch": index + 1,
                     "model_state": self.model.state_dict(),
                     "optimizer_state": self.optimizer.state_dict(),
                     "scheduler_state": self.scheduler.state_dict(),
                 } 
-                _save_path = osp.join(self.logdir, '{}_bestmodel.pt'.format('glare'))
+                _save_path = osp.join(self.logdir, '{}_bestmodel_{}.pt'.format('glare',str(float(psnr_val_rgb))))
                 torch.save(_state, _save_path)
             format_str = "epoch: {}\n avg PSNR: {:3f}"
             print_str = format_str.format(int(self.epo) ,float(psnr_val_rgb))
-            ic(print_str)
-            self.logger.info(print_str)
-
-        if np.mod(index, self.loss_print_interval) == 0:
-            format_str = "epoch: {}\n avg loss: {:3f}"
-            print_str = format_str.format(int(self.epo) ,float(loss_sum))
             ic(print_str)
             self.logger.info(print_str)
 
@@ -187,15 +184,16 @@ class Trainer(object):
                 "optimizer_state": self.optimizer.state_dict(),
                 "scheduler_state": self.scheduler.state_dict(),
             } 
-            _save_path_latest = osp.join(self.logdir, '{}_latestmodel_{}.pt'.format('glare',index+1))
+            _save_path_latest = osp.join(self.logdir, '{}_latestmodel.pt'.format('glare'))
             torch.save(_state,_save_path_latest)
+        self.scheduler.step()
 
     def train(self):
         """Start training."""
         for self.epo in range(self.start_epo, self.max_epoch):
             self.step('train')
             self.step('val')
-            self.scheduler.step()
+            #self.scheduler.step()
 
     def test(self):
         """start testing."""
@@ -230,7 +228,7 @@ def parse():
         default='/dataset_sub/camera_light_glare/')
     parser.add_argument('--batch_size', '-bs', type=int,
                         help='batch size',
-                        default=1)
+                        default=6)
     parser.add_argument('--max_epoch', '-me', type=int,
                         help='max epoch',       
                         default=300)
@@ -240,14 +238,15 @@ def parse():
                         default=None)
     parser.add_argument('--width', type=int,
                         help='feature map width',
-                        default=512)
+                        default=1024)
     parser.add_argument('--height', type=int,
                         help='feature map height',
-                        default=512)
+                        default=1024)
     parser.add_argument('--resume', type=str,
                         help='Train process resume cur/bcnn_latestmodel.pt',
-                        #default='./cur/deglare/bcnn_latestmodel.pt')
-                        default=None)
+                        #default='./cur/deglare/glare_latestmodel_94.pt')
+                        default= './checkpoints/glare_bestmodel_22.2388916015625.pt')
+                        #default=None)
     parser.add_argument('--work_dir', type=str,
                         help='Work directory cur/bcnn',
                         default='./cur/deglare')
@@ -289,5 +288,5 @@ if __name__ == "__main__":
                       resume_train = args.resume,
                       work_dir = args.work_dir, 
                       args=args)
-    trainer.train()
+    #trainer.train()
     trainer.test()
