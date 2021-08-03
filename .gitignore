@@ -143,3 +143,14 @@ dmypy.json
 .vscode/settings.json
 *.pth 
 *.zip
+
+#sjk
+flare_venv/
+scripts/cur/
+scripts/results/
+scripts/wandb/
+
+#other
+cur/
+events*
+wandb/

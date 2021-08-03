@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import pickle
 import cv2
+import os
 
 def is_numpy_file(filename):
     return any(filename.endswith(extension) for extension in [".npy"])
@@ -35,9 +36,15 @@ def load_img(filepath):
     img = img/255.
     return img
 
-def save_img(filepath, img):
+def save_img(filepath, img, color_domain='rgb'):
+    directory = os.path.dirname(filepath)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    #if color_domain == 'ycbcr':
+    #    cv2.imwrite(filepath,cv2.cvtColor(img, cv2.COLOR_YCR_CB2BGR))
+    #else:
     cv2.imwrite(filepath,cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-
+        
 def myPSNR(tar_img, prd_img):
     imdff = torch.clamp(prd_img,0,1) - torch.clamp(tar_img,0,1)
     rmse = (imdff**2).mean().sqrt()
@@ -48,5 +55,5 @@ def batch_PSNR(img1, img2, data_range=None):
     PSNR = []
     for im1, im2 in zip(img1, img2):
         psnr = myPSNR(im1, im2)
-        PSNR.append(psnr)
+        PSNR.append(psnr.cpu())
     return sum(PSNR)/len(PSNR)

@@ -2,6 +2,8 @@
 # coding: utf-8
 
 from pathlib import Path
+from albumentations.augmentations.functional import gamma_transform
+from albumentations.augmentations.transforms import ColorJitter
 
 import numpy as np
 from torch.utils.data import DataLoader, Dataset, random_split
@@ -14,28 +16,50 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 
-def load_dataset(data_path, batch_size, distributed, train_valid_split_weight=0.9, resize_size=(512,512), model_type='baseline'):
+def load_dataset(data_path, batch_size, distributed, center_crop=False, random_crop=False, h2g_aug=False, resize_size=(512,512), model_type='baseline', color_domain='rgb', tv_change=False):
+    if random_crop:
+        transformer_train = A.Compose([
+            #A.Resize(resize_size[0],resize_size[1]),
+            A.RandomCrop(width=resize_size[0], height=resize_size[1]),
+            A.HorizontalFlip(p=0.5),
+            A.RandomRotate90(p=0.5),
+            A.VerticalFlip(p=0.5),
+            ToTensorV2()
+            ], additional_targets={'target': 'image'})
+    elif center_crop:
+        transformer_train = A.Compose([
+            #A.Resize(resize_size[0],resize_size[1]),
+            #A.RandomCrop(width=resize_size[0], height=resize_size[1]),
+            A.HorizontalFlip(p=0.5),
+            A.RandomRotate90(p=0.5),
+            A.VerticalFlip(p=0.5),
+            ToTensorV2()
+            ], additional_targets={'target': 'image'})
+    else: 
+        transformer_train = A.Compose([
+            #A.Resize(resize_size[0],resize_size[1]),
+            #A.RandomCrop(width=resize_size[0], height=resize_size[1]),
+            A.HorizontalFlip(p=0.5),
+            A.RandomRotate90(p=0.5),
+            A.VerticalFlip(p=0.5),
+            ToTensorV2()
+            ], additional_targets={'target': 'image'})
 
-    #_dataloader = DataLoaderImg(data_path, mode='train', resize_size=resize_size)
-    # train_size = int(train_valid_split_weight * len(_dataloader))
-    # val_size = len(_dataloader) - train_size
+    if h2g_aug:
+        transformer_train = A.Compose([
+            A.RandomCrop(width=resize_size[0], height=resize_size[1]),
+            A.HorizontalFlip(p=0.5),
+            A.RandomRotate90(p=0.5),
+            A.VerticalFlip(p=0.5),
+            A.ColorJitter(p=0.5, brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+            ToTensorV2()
+            ], additional_targets={'target': 'image'})
 
-    # print("train-size",train_size)
-    # print("val-size",val_size)
-    # train_dataset, val_dataset = random_split(_dataloader, [train_size, val_size])
-    
-    transformer_train = A.Compose([
-        #A.Resize(256,256),
-        #A.RandomCrop(224,224),
-        A.HorizontalFlip(p=0.5),
-        A.RandomRotate90(p=0.5),
-        A.VerticalFlip(p=0.5),
-        #A.MotionBlur(p=0.5),
-        #A.OpticalDistortion(p=0.5),
-        #A.GaussNoise(p=0.5),
-        #A.Normalize(255),
-        ToTensorV2()
-        ])
+    transformer_valid = A.Compose([
+            A.Resize(resize_size[0],resize_size[1]),
+            ToTensorV2()
+            ], additional_targets={'target': 'image'})
+
     if model_type == "MIRNet":
         transformer_test = A.Compose([A.Resize(2048, 1024), ToTensorV2()])
     elif model_type == "Uformer16":
@@ -43,44 +67,48 @@ def load_dataset(data_path, batch_size, distributed, train_valid_split_weight=0.
     elif model_type == "Uformer32":
         transformer_test = A.Compose([A.Resize(2048, 2048), ToTensorV2()])
     else:
-        transformer_test = A.Compose([A.Resize(2048, 1024), ToTensorV2()])
+        transformer_test = A.Compose([A.Resize(3584, 2560), ToTensorV2()])
 
-    train_dataset = DataLoaderImg(data_path, mode='train', resize_size=resize_size, transform=transformer_train)
-    val_dataset = DataLoaderImg(data_path, mode='val', resize_size=resize_size, transform=transformer_train)
-    test_dataset = DataLoaderImg(data_path, mode='test', transform=transformer_test)
-    
-    train_sampler = None
-    val_sampler = None
-    if distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-        val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
+    train_dataset = DataLoaderImg(data_path, mode='train', resize_size=resize_size, transform=transformer_train, color_domain=color_domain, tv_change=tv_change)
+    val_dataset = DataLoaderImg(data_path, mode='val', resize_size=resize_size, transform=transformer_valid, color_domain=color_domain, tv_change=tv_change)
+    test_dataset = DataLoaderImg(data_path, mode='test', transform=transformer_test, color_domain=color_domain)
 
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size * 2, shuffle=True, num_workers=16, pin_memory=True)
     test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
     return train_dataloader, val_dataloader, test_dataloader
 
+
 class DataLoaderImg(Dataset):
-    def __init__(self, data_path, mode='train', transform=True, resize_size=(512,512)):
+    def __init__(self, data_path, mode='train', transform=True, resize_size=(512,512), color_domain='rgb', tv_change=False):
         self.mode = mode
         self.data_path = data_path
         self.transform = transform
         self.target_size = resize_size
         self.dataset_type = mode
+        self.color_domain = color_domain
         augmentations = Compose([RandomHorizontallyFlip(0.5), RandomVerticallyFlip(0.5)])
         self.augmentations = augmentations
 
         if self.dataset_type == 'train':
             #self.in_feature_paths = list(sorted(Path(self.data_path).glob("train/train_input_img/*.png")))
             #self.target_feature_paths = list(sorted(Path(self.data_path).glob("train/train_label_img/*.png")))
-            self.in_feature_paths = list(sorted(Path(self.data_path).glob("patches_512_sample/train_patch/train_input_img/*.png")))
-            self.target_feature_paths = list(sorted(Path(self.data_path).glob("patches_512_sample/train_patch/train_label_img/*.png")))
-        elif self.dataset_type == 'val':    
+            if tv_change:
+                self.in_feature_paths = list(sorted(Path(self.data_path).glob("val_patch/train_input_img/*.png")))
+                self.target_feature_paths = list(sorted(Path(self.data_path).glob("val_patch/train_label_img/*.png")))
+            else:
+                self.in_feature_paths = list(sorted(Path(self.data_path).glob("train_patch/train_input_img/*.png")))
+                self.target_feature_paths = list(sorted(Path(self.data_path).glob("train_patch/train_label_img/*.png")))
+        elif self.dataset_type == 'val':
             #self.in_feature_paths = list(sorted(Path(self.data_path).glob("train/train_input_img/*.png")))
             #self.target_feature_paths = list(sorted(Path(self.data_path).glob("train/train_label_img/*.png")))
-            self.in_feature_paths = list(sorted(Path(self.data_path).glob("patches_512_sample/val_patch/train_input_img/*.png")))
-            self.target_feature_paths = list(sorted(Path(self.data_path).glob("patches_512_sample/val_patch/train_label_img/*.png")))
+            if tv_change:
+                self.in_feature_paths = list(sorted(Path(self.data_path).glob("train_patch/train_input_img/*.png")))
+                self.target_feature_paths = list(sorted(Path(self.data_path).glob("train_patch/train_label_img/*.png")))
+            else:
+                self.in_feature_paths = list(sorted(Path(self.data_path).glob("val_patch/train_input_img/*.png")))
+                self.target_feature_paths = list(sorted(Path(self.data_path).glob("val_patch/train_label_img/*.png"))) 
         elif self.dataset_type == 'test':
             self.test_feature_paths = list(sorted(Path(self.data_path).glob("test_input_img/*.png")))
 
@@ -90,12 +118,10 @@ class DataLoaderImg(Dataset):
         return len(self.in_feature_paths)
     
     def __transform__(self, img):
-        #if self.mode != 'test':
-        #    img = cv2.resize(img, (self.target_size[0], self.target_size[1]))
-        #else:
-        #    img = cv2.resize(img, (2048, 1024))
         if self.mode == 'test':
             img = cv2.resize(img, (2048, 1024))
+        
+        img = cv2.resize(img, (self.target_size[0], self.target_size[1]))
         img = img / 255.0
         img = img.transpose(2, 0, 1)
         return torch.from_numpy(img).float()
@@ -103,18 +129,24 @@ class DataLoaderImg(Dataset):
     def __getitem__(self, idx):
         if self.dataset_type == 'test':
             img = cv2.cvtColor(cv2.imread(str(self.test_feature_paths[idx])), cv2.COLOR_BGR2RGB)
-            data = self.transform(image=img)
-            img = (data['image'] / 255.0)
+            #data = self.transform(image=img)
+            #img = (data['image'] / 255.0)
+            img = img / 255.0
             return img, self.test_feature_paths[idx].name
 
-        img = cv2.cvtColor(cv2.imread(str(self.in_feature_paths[idx])), cv2.COLOR_BGR2RGB)
-        lbl = cv2.cvtColor(cv2.imread(str(self.target_feature_paths[idx])), cv2.COLOR_BGR2RGB)
-        
-        #if self.augmentations is not None:
-        #    img, lbl = self.augmentations(img, lbl)
-        #return self.__transform__(img), self.__transform__(lbl), self.in_feature_paths[idx].name
-        data = self.transform(image=img, mask=lbl)
+        if self.color_domain == 'ycbcr':
+            img = cv2.cvtColor(cv2.imread(str(self.in_feature_paths[idx])), cv2.COLOR_BGR2YCR_CB)
+            lbl = cv2.cvtColor(cv2.imread(str(self.target_feature_paths[idx])), cv2.COLOR_BGR2YCR_CB)
+        else: 
+            img = cv2.cvtColor(cv2.imread(str(self.in_feature_paths[idx])), cv2.COLOR_BGR2RGB)
+            lbl = cv2.cvtColor(cv2.imread(str(self.target_feature_paths[idx])), cv2.COLOR_BGR2RGB)
+
+        # if self.augmentations is not None:
+        #     img, lbl = self.augmentations(img, lbl)
+        # return self.__transform__(img), self.__transform__(lbl), self.in_feature_paths[idx].name
+
+        # albumentations
+        data = self.transform(image=img, target=lbl)
         img = (data['image'] / 255.0)
-        lbl = (data['mask'] / 255.0)
-        lbl = lbl.permute(2, 0, 1)
+        lbl = (data['target'] / 255.0)
         return img, lbl, self.in_feature_paths[idx].name
