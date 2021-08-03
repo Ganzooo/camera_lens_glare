@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICE=0 python src/train_no_apex.py --batch_size 6 --max_epoch 60 --data_path /home/kt05/work/dataset/camera_light_glare/ --width 1024 --height 1024 --model_type resnet_unet 
